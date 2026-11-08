@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - 'claude/**'
+      - main
     paths:
       - 'scripts/font-enum/**'
       - 'scripts/figma-native-stub.js'

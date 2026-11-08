@@ -2,7 +2,7 @@ name: build and launcher tests
 
 on:
   push:
-    branches: [master, 'codex/**']
+    branches: [master, main]
     paths:
       - 'build.sh'
       - 'figma-version-tool.sh'

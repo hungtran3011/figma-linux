@@ -1,0 +1,103 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Figma version (e.g. 126.11.8). Leave blank to auto-detect from latest installer.'
+        required: false
+        default: ''
+      publish_release:
+        description: 'Publish GitHub release with binary assets'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install build tools and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full imagemagick rpm curl wget file dpkg-dev
+
+      - name: Download Windows installer
+        run: |
+          mkdir -p installer-cache
+          echo "Downloading latest FigmaSetup.exe..."
+          curl -fSL --retry 3 --connect-timeout 15 -o installer-cache/FigmaSetup.exe https://desktop.figma.com/win/FigmaSetup.exe
+
+      - name: Determine Figma version
+        id: determine_version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(node -e "
+              const { execSync } = require('child_process');
+              const res = execSync('./figma-version-tool.sh --exe installer-cache/FigmaSetup.exe --json').toString();
+              console.log(JSON.parse(res).installer_version);
+            ")
+          fi
+          echo "Detected version: $VERSION"
+          echo "FIGMA_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build AppImage
+        run: ./build.sh --build appimage --clean no --exe installer-cache/FigmaSetup.exe
+
+      - name: Build Debian package (.deb)
+        run: ./build.sh --build deb --clean no --exe installer-cache/FigmaSetup.exe
+
+      - name: Build RPM package (.rpm)
+        run: ./build.sh --build rpm --clean no --exe installer-cache/FigmaSetup.exe
+
+      - name: Prepare distribution directory and SHA256SUMS
+        run: |
+          mkdir -p dist
+          mv figma-desktop*.AppImage dist/ 2>/dev/null || true
+          mv figma-desktop*.deb dist/ 2>/dev/null || true
+          mv figma-desktop*.rpm dist/ 2>/dev/null || true
+          cd dist
+          sha256sum * > SHA256SUMS
+          echo "Generated Checksums:"
+          cat SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: figma-desktop-${{ env.FIGMA_VERSION }}
+          path: dist/*
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.publish_release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || env.FIGMA_VERSION }}
+          name: Figma Desktop ${{ env.FIGMA_VERSION }} for Linux
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

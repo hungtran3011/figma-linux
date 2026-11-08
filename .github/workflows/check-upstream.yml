@@ -1,0 +1,110 @@
+name: Check Upstream Figma Version
+
+on:
+  schedule:
+    # Runs daily at 03:00 UTC (10:00 AM UTC+7)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      auto_trigger_build:
+        description: 'Automatically trigger release workflow if a new version is found'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  check-version:
+    name: Check for New Figma Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check upstream Figma version
+        id: check
+        run: |
+          source scripts/figma-version-common.sh
+          UPSTREAM_VER=$(figma_fetch_manifest_version "https://desktop.figma.com/win/RELEASES" || echo "")
+
+          if [ -z "$UPSTREAM_VER" ]; then
+            echo "::error::Could not determine upstream Figma version from RELEASES manifest."
+            exit 1
+          fi
+
+          echo "Detected upstream version: $UPSTREAM_VER"
+          echo "upstream_version=$UPSTREAM_VER" >> "$GITHUB_OUTPUT"
+
+          # Get latest release from this repository (stripping any leading 'v')
+          LATEST_RELEASE=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+          LATEST_RELEASE="${LATEST_RELEASE#v}"
+          echo "Latest repository release: ${LATEST_RELEASE:-None}"
+          echo "latest_release=$LATEST_RELEASE" >> "$GITHUB_OUTPUT"
+
+          # Check if tag already exists in the repo
+          TAG_EXISTS=false
+          if git rev-parse "refs/tags/$UPSTREAM_VER" >/dev/null 2>&1 || git rev-parse "refs/tags/v$UPSTREAM_VER" >/dev/null 2>&1; then
+            echo "Tag for $UPSTREAM_VER already exists in repository."
+            TAG_EXISTS=true
+          fi
+
+          if [ "$TAG_EXISTS" = "false" ] && [ "$UPSTREAM_VER" != "$LATEST_RELEASE" ]; then
+            echo "New upstream version found!"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Repository is up to date."
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify via Issue
+        if: steps.check.outputs.has_update == 'true'
+        run: |
+          UPSTREAM_VER="${{ steps.check.outputs.upstream_version }}"
+          LATEST_RELEASE="${{ steps.check.outputs.latest_release }}"
+
+          # Avoid creating duplicate issues if one is already open
+          EXISTING_ISSUE=$(gh issue list --state open --search "$UPSTREAM_VER in:title" --json number -q '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_ISSUE" ]; then
+            echo "Issue #$EXISTING_ISSUE already open for $UPSTREAM_VER. Skipping creation."
+          else
+            cat <<-EOF > issue_body.md
+            ### Upstream Update Detected
+
+            An official Figma Desktop release **$UPSTREAM_VER** is available on \`desktop.figma.com\`.
+
+            - **Detected Upstream Version**: \`$UPSTREAM_VER\`
+            - **Latest Packaged Release**: \`${LATEST_RELEASE:-None}\`
+
+            #### How to Build & Release:
+            1. **GitHub Actions**: Run the [Build and Release Workflow](https://github.com/${{ github.repository }}/actions/workflows/release.yml) with \`version=$UPSTREAM_VER\`.
+            2. **Git Tag**:
+            \`\`\`bash
+            git tag $UPSTREAM_VER
+            git push origin $UPSTREAM_VER
+            \`\`\`
+            EOF
+            gh issue create \
+              --title "New Figma Desktop version: $UPSTREAM_VER" \
+              --body-file issue_body.md
+            echo "Issue created for $UPSTREAM_VER."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-trigger release workflow (optional)
+        if: steps.check.outputs.has_update == 'true' && github.event.inputs.auto_trigger_build == 'true'
+        run: |
+          UPSTREAM_VER="${{ steps.check.outputs.upstream_version }}"
+          echo "Triggering release.yml for version $UPSTREAM_VER..."
+          gh workflow run release.yml -f version="$UPSTREAM_VER"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
