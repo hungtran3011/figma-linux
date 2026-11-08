@@ -32,11 +32,52 @@ download_verified() {
 
 	echo "Downloading $url"
 	rm -f "$output"
-	if ! wget -q --tries=2 --timeout=30 -O "$output" "$url"; then
+
+	local download_success=false
+	# Try direct download first with wget or curl
+	if wget -q --tries=2 --timeout=30 -O "$output" "$url"; then
+		download_success=true
+	elif curl -fSL --retry 2 --connect-timeout 15 -o "$output" "$url" 2>/dev/null; then
+		download_success=true
+	fi
+
+	# If direct download failed and it is a GitHub release URL, fall back to GitHub API endpoint
+	# (bypasses GitHub frontend 504 gateway timeout issues on /releases/download/)
+	if [[ $download_success != true && $url =~ ^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)$ ]]; then
+		local owner="${BASH_REMATCH[1]}"
+		local repo="${BASH_REMATCH[2]}"
+		local tag="${BASH_REMATCH[3]}"
+		local filename="${BASH_REMATCH[4]}"
+		echo "Direct release download failed. Querying GitHub API fallback for $filename..." >&2
+
+		local api_url="https://api.github.com/repos/${owner}/${repo}/releases/tags/${tag}"
+		local asset_url=''
+		if command -v jq &>/dev/null; then
+			asset_url=$(curl -sL "$api_url" | jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .url' 2>/dev/null | head -n 1)
+		elif command -v node &>/dev/null; then
+			asset_url=$(curl -sL "$api_url" | node -e '
+				const fs = require("fs");
+				try {
+					const data = JSON.parse(fs.readFileSync(0, "utf8"));
+					const asset = data.assets?.find(a => a.name === process.argv[1]);
+					if (asset?.url) console.log(asset.url);
+				} catch(_) {}
+			' "$filename" 2>/dev/null)
+		fi
+
+		if [[ -n $asset_url && $asset_url != 'null' ]]; then
+			if curl -fSL --retry 2 --connect-timeout 20 -H 'Accept: application/octet-stream' -o "$output" "$asset_url"; then
+				download_success=true
+			fi
+		fi
+	fi
+
+	if [[ $download_success != true ]]; then
 		echo "Failed to download $url" >&2
 		rm -f "$output"
 		exit 1
 	fi
+
 	if ! printf '%s  %s\n' "$expected_sha256" "$output" | sha256sum --check --status; then
 		echo "Checksum verification failed for $output" >&2
 		rm -f "$output"
