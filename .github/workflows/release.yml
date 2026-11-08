@@ -62,14 +62,14 @@ jobs:
           echo "FIGMA_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build AppImage
-        run: ./build.sh --build appimage --clean no --exe installer-cache/FigmaSetup.exe
-
       - name: Build Debian package (.deb)
         run: ./build.sh --build deb --clean no --exe installer-cache/FigmaSetup.exe
 
       - name: Build RPM package (.rpm)
         run: ./build.sh --build rpm --clean no --exe installer-cache/FigmaSetup.exe
+
+      - name: Build AppImage
+        run: ./build.sh --build appimage --clean no --exe installer-cache/FigmaSetup.exe
 
       - name: Prepare distribution directory and SHA256SUMS
         run: |

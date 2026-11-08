@@ -34,10 +34,10 @@ download_verified() {
 	rm -f "$output"
 
 	local download_success=false
-	# Try direct download first with wget or curl
-	if wget -q --tries=2 --timeout=30 -O "$output" "$url"; then
+	# Try direct download first with curl or wget (short timeout for quick failover)
+	if curl -fSL --retry 1 --connect-timeout 5 --max-time 15 -o "$output" "$url" 2>/dev/null; then
 		download_success=true
-	elif curl -fSL --retry 2 --connect-timeout 15 -o "$output" "$url" 2>/dev/null; then
+	elif wget -q --tries=1 --timeout=15 -O "$output" "$url"; then
 		download_success=true
 	fi
 
@@ -52,21 +52,25 @@ download_verified() {
 
 		local api_url="https://api.github.com/repos/${owner}/${repo}/releases/tags/${tag}"
 		local asset_url=''
-		if command -v jq &>/dev/null; then
-			asset_url=$(curl -sL "$api_url" | jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .url' 2>/dev/null | head -n 1)
-		elif command -v node &>/dev/null; then
-			asset_url=$(curl -sL "$api_url" | node -e '
-				const fs = require("fs");
-				try {
-					const data = JSON.parse(fs.readFileSync(0, "utf8"));
-					const asset = data.assets?.find(a => a.name === process.argv[1]);
-					if (asset?.url) console.log(asset.url);
-				} catch(_) {}
-			' "$filename" 2>/dev/null)
-		fi
+		for _ in 1 2 3; do
+			if command -v jq &>/dev/null; then
+				asset_url=$(curl -sL --connect-timeout 5 --max-time 15 "$api_url" | jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .url' 2>/dev/null | head -n 1)
+			elif command -v node &>/dev/null; then
+				asset_url=$(curl -sL --connect-timeout 5 --max-time 15 "$api_url" | node -e '
+					const fs = require("fs");
+					try {
+						const data = JSON.parse(fs.readFileSync(0, "utf8"));
+						const asset = data.assets?.find(a => a.name === process.argv[1]);
+						if (asset?.url) console.log(asset.url);
+					} catch(_) {}
+				' "$filename" 2>/dev/null)
+			fi
+			[[ -n $asset_url && $asset_url != 'null' ]] && break
+			sleep 1
+		done
 
 		if [[ -n $asset_url && $asset_url != 'null' ]]; then
-			if curl -fSL --retry 2 --connect-timeout 20 -H 'Accept: application/octet-stream' -o "$output" "$asset_url"; then
+			if curl -fSL --retry 2 --connect-timeout 10 --max-time 180 -H 'Accept: application/octet-stream' -o "$output" "$asset_url"; then
 				download_success=true
 			fi
 		fi

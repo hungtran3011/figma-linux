@@ -427,6 +427,47 @@ setup_nodejs() {
 	section_footer 'Node.js Setup'
 }
 
+download_electron_binary() {
+	local version="$1" arch="$2" dest_dir="$3"
+	local electron_arch="$arch"
+	[[ $arch == 'amd64' ]] && electron_arch='x64'
+	[[ $arch == 'arm64' ]] && electron_arch='arm64'
+
+	local zip_name="electron-v${version}-linux-${electron_arch}.zip"
+	local temp_zip="$work_dir/$zip_name"
+	local urls=(
+		"https://registry.npmmirror.com/-/binary/electron/v${version}/${zip_name}"
+		"https://cdn.npmmirror.com/binaries/electron/v${version}/${zip_name}"
+		"https://github.com/electron/electron/releases/download/v${version}/${zip_name}"
+	)
+
+	echo "Attempting fallback download for Electron binary ($zip_name)..."
+	local downloaded=false
+	for url in "${urls[@]}"; do
+		echo "Trying $url..."
+		if curl -fSL --retry 2 --connect-timeout 15 -o "$temp_zip" "$url" 2>/dev/null; then
+			downloaded=true
+			break
+		fi
+	done
+
+	if [[ $downloaded == true && -f $temp_zip ]]; then
+		echo "Extracting Electron binary to $dest_dir..."
+		mkdir -p "$dest_dir"
+		if command -v 7z &>/dev/null; then
+			7z x -y "$temp_zip" -o"$dest_dir" >/dev/null
+		elif command -v unzip &>/dev/null; then
+			unzip -q -o "$temp_zip" -d "$dest_dir"
+		else
+			tar -xf "$temp_zip" -C "$dest_dir" 2>/dev/null || true
+		fi
+		rm -f "$temp_zip"
+		return 0
+	fi
+
+	return 1
+}
+
 setup_electron_asar() {
 	section_header 'Electron & Asar Setup'
 
@@ -462,9 +503,12 @@ setup_electron_asar() {
 		if [[ ! -d $electron_dist_path && -f $electron_install_script ]]; then
 			echo 'Downloading Electron platform binary (install.js)...'
 			if ! node "$electron_install_script"; then
-				echo 'Failed to download Electron platform binary.' >&2
-				cd "$project_root" || exit 1
-				exit 1
+				echo 'Standard Electron install.js failed (e.g. GitHub release 504). Trying mirror fallback...' >&2
+				if ! download_electron_binary "$electron_version" "$architecture" "$electron_dist_path"; then
+					echo 'Failed to download Electron platform binary.' >&2
+					cd "$project_root" || exit 1
+					exit 1
+				fi
 			fi
 		fi
 	else
