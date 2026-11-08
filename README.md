@@ -3,16 +3,7 @@
   Figma Desktop for Linux
 </h1>
 
-> [!IMPORTANT]
-> **Archived — no longer maintained as of November 7, 2026.**
->
-> Unfortunately, I no longer have the time to maintain this project. I now work on macOS and Windows, and I no longer have a personal interest in continuing its development.
->
-> There will be no further releases, bug fixes, security updates, or support from me. Existing issues and pull requests will remain available for reference, but I will no longer review or merge contributions here.
->
-> The source, documentation, and existing releases are preserved for reference. The instructions below describe the project before archival; compatibility with future Figma versions is not guaranteed. If you would like to continue development, you are welcome to fork the repository and maintain your own version.
->
-> Thank you to everyone who used the project, reported issues, and contributed fixes.
+A fork from [IliyaBrook's Figma Linux](https://github.com/IliyaBrook/figma-linux), as the original author may not maintain this in the future. See more at their repo's README.
 
 <p align="center">
   Run the <b>real</b> Figma Desktop app on Linux — not a browser wrapper, not a web app,<br/>
