@@ -22,13 +22,12 @@ detect_display_backend() {
 	is_wayland=false
 	[[ -n ${WAYLAND_DISPLAY:-} ]] && is_wayland=true
 
-	# Default: Use X11/XWayland on Wayland for compatibility
-	# Use native Wayland if XWayland is unavailable, or when explicitly requested.
-	use_x11_on_wayland=true
-	if [[ ${FIGMA_USE_WAYLAND:-} == '1' || -z ${DISPLAY:-} ]]; then
-		use_x11_on_wayland=false
+	# Default: Use native Wayland on Wayland for touchpad gestures and performance
+	# Use X11/XWayland if explicitly requested via FIGMA_USE_X11=1 or FIGMA_USE_WAYLAND=0.
+	use_x11_on_wayland=false
+	if [[ ${FIGMA_USE_X11:-} == '1' || ${FIGMA_USE_WAYLAND:-} == '0' ]]; then
+		use_x11_on_wayland=true
 	fi
-	[[ ${FIGMA_USE_X11:-} == '1' ]] && use_x11_on_wayland=true
 	return 0
 }
 
@@ -102,11 +101,11 @@ build_electron_args() {
 	fi
 
 	if [[ $use_x11_on_wayland == true ]]; then
-		# Default: Use X11 via XWayland for compatibility
+		# Fallback: Use X11 via XWayland when requested
 		log_message 'Using X11 backend via XWayland'
 		electron_args+=('--ozone-platform=x11')
 	else
-		# Native Wayland mode (user opted in via FIGMA_USE_WAYLAND=1)
+		# Native Wayland mode (default on Wayland)
 		log_message 'Using native Wayland backend'
 		electron_args+=('--enable-features=UseOzonePlatform,WaylandWindowDecorations')
 		electron_args+=('--ozone-platform=wayland')

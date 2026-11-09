@@ -61,7 +61,7 @@ Type=Application
 Terminal=false
 Categories=Graphics;Development;
 MimeType=x-scheme-handler/figma;
-StartupWMClass=Figma
+StartupWMClass=figma-desktop
 Comment=Figma Desktop for Linux
 EOF
 

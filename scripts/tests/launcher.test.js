@@ -36,16 +36,21 @@ test('X11 without GLX selects SwiftShader and keeps WebGL enabled for every pack
   }
 });
 
-test('XWayland retains X11 compatibility backend and probes that display', () => {
-  const args = launchArgs({ probe: 'printf "number of extensions: 0\\n"', env: { WAYLAND_DISPLAY: 'wayland-0' } });
+test('Wayland session defaults to native Wayland backend and bypasses X11 probe', () => {
+  const args = launchArgs({ probe: 'echo "unexpected probe" >&2; exit 99', env: { WAYLAND_DISPLAY: 'wayland-0' } });
+  assert.ok(args.includes('--ozone-platform=wayland'));
+  assert.ok(!args.includes('--use-angle=swiftshader'));
+});
+
+test('explicit X11 preference uses XWayland backend and probes that display', () => {
+  const args = launchArgs({ probe: 'printf "number of extensions: 0\\n"', env: { WAYLAND_DISPLAY: 'wayland-0', FIGMA_USE_X11: '1' } });
   assert.ok(args.includes('--ozone-platform=x11'));
   assert.ok(args.includes('--use-angle=swiftshader'));
 });
 
-test('native Wayland opt-in bypasses X11 probe', () => {
-  const args = launchArgs({ probe: 'echo "unexpected probe" >&2; exit 99', env: { WAYLAND_DISPLAY: 'wayland-0', FIGMA_USE_WAYLAND: '1' } });
-  assert.ok(args.includes('--ozone-platform=wayland'));
-  assert.ok(!args.includes('--use-angle=swiftshader'));
+test('FIGMA_USE_WAYLAND=0 forces XWayland fallback', () => {
+  const args = launchArgs({ env: { WAYLAND_DISPLAY: 'wayland-0', FIGMA_USE_WAYLAND: '0' } });
+  assert.ok(args.includes('--ozone-platform=x11'));
 });
 
 test('Wayland session without DISPLAY uses native Wayland automatically', () => {

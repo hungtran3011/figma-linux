@@ -906,6 +906,26 @@ console.log('Duplicate tabs patch applied (' + patched + '/5 patches)');
 		else
 			echo "Warning: app menu popup patch did not match in $main_js"
 		fi
+
+		# ---- Support loading shell.html in unpacked dev mode (.asar.contents) ----
+		# In dev mode, resources are loaded from app.asar.contents/ instead of app.asar/.
+		# The file protocol handler splits on ".asar/", which causes 404 Not Found for shell.html.
+		# Allow splitting on .asar.contents/ as well so the tab bar loads in dev mode.
+		node -e "
+const fs = require('fs');
+let code = fs.readFileSync('$main_js', 'utf8');
+const oldPattern = '.url.split(\".asar/\").at(-1)';
+const newPattern = '.url.split(\".asar\").at(-1).replace(/^\\\\.contents\\\\//,\"\").replace(/^\\\\//,\"\")';
+if (code.includes(oldPattern)) {
+  code = code.replace(oldPattern, newPattern);
+  fs.writeFileSync('$main_js', code);
+  console.log('Patched $main_js: shell resource loading enabled for dev mode');
+} else if (code.includes(newPattern)) {
+  console.log('dev mode shell resource patch already applied in $main_js');
+} else {
+  console.error('Warning: dev mode shell resource pattern not found in $main_js');
+}
+"
 	fi
 
 	# Also patch desktop_shell.js if it has BrowserWindow references
@@ -956,6 +976,7 @@ const fs = require('fs');
 const pkg = require('./app.asar.contents/package.json');
 pkg.originalMain = pkg.main;
 pkg.main = 'frame-fix-entry.js';
+pkg.desktopName = 'figma-desktop';
 fs.writeFileSync('./app.asar.contents/package.json', JSON.stringify(pkg, null, 2));
 console.log('Updated package.json: main entry set to frame-fix-entry.js');
 "
@@ -1324,6 +1345,18 @@ process_icons() {
 		fi
 	fi
 
+	# Copy main app icon to Electron resources for window and taskbar identity
+	echo 'Copying main app icon to Electron resources...'
+	local main_icon_src=''
+	main_icon_src=$(find "$work_dir" -maxdepth 1 -name "figma_*.png" -exec identify -format '%w %h %i\n' {} \; 2>/dev/null | awk '$1==256 && $2==256 {print $3; exit}')
+	if [[ -z $main_icon_src ]]; then
+		main_icon_src=$(find "$work_dir" -maxdepth 1 -name "figma_*.png" -exec identify -format '%w %i\n' {} \; 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
+	fi
+	if [[ -f $main_icon_src && -d "$electron_resources_dest" ]]; then
+		cp "$main_icon_src" "$electron_resources_dest/icon.png" || true
+		echo "Main app icon copied to $electron_resources_dest/icon.png"
+	fi
+
 	cd "$project_root" || exit 1
 	section_footer 'Icon Processing'
 }
@@ -1404,6 +1437,11 @@ run_packaging() {
 			output_path="./$(basename "$appimage_file")"
 			mv "$appimage_file" "$output_path" || exit 1
 			echo "Package created at: $output_path"
+			if [[ -f "${appimage_file}.zsync" ]]; then
+				local zsync_output="./$(basename "${appimage_file}.zsync")"
+				mv "${appimage_file}.zsync" "$zsync_output" || exit 1
+				echo "Zsync file created at: $zsync_output"
+			fi
 		else
 			echo 'Warning: Could not determine final .AppImage file path.'
 			output_path='Not Found'

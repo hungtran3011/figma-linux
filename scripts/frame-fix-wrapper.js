@@ -1,8 +1,34 @@
 // Inject frame fix before main app loads
+const fs = require('fs');
+const path = require('path');
 const Module = require('module');
 const originalRequire = Module.prototype.require;
 
 console.log('[Frame Fix] Wrapper loaded');
+
+let resolvedAppIcon = null;
+function resolveAppIconPath() {
+	if (resolvedAppIcon !== null) return resolvedAppIcon;
+	const candidates = [
+		path.join(process.resourcesPath || '', 'icon.png'),
+		path.join(__dirname, 'icon.png'),
+		path.join(__dirname, 'assets', 'icon.png'),
+		process.env.APPDIR ? path.join(process.env.APPDIR, 'usr/share/icons/hicolor/256x256/apps/figma-desktop.png') : '',
+		process.env.APPDIR ? path.join(process.env.APPDIR, 'figma-desktop.png') : '',
+		process.env.APPDIR ? path.join(process.env.APPDIR, 'io.github.nickvdp.figma-desktop-linux.png') : '',
+		path.join(process.env.XDG_DATA_HOME || path.join(process.env.HOME || '', '.local/share'), 'icons/hicolor/256x256/apps/figma-desktop.png'),
+		'/usr/share/icons/hicolor/256x256/apps/figma-desktop.png',
+	];
+	for (const p of candidates) {
+		if (p && fs.existsSync(p)) {
+			resolvedAppIcon = p;
+			console.log(`[Frame Fix] Found app icon: ${p}`);
+			return resolvedAppIcon;
+		}
+	}
+	resolvedAppIcon = '';
+	return '';
+}
 
 const WIN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
@@ -20,6 +46,7 @@ function applyWindowsUserAgent(webContents) {
 let PatchedBrowserWindow = null;
 let PatchedWebContentsView = null;
 let PatchedBrowserView = null;
+let PatchedTray = null;
 let patchedSetApplicationMenu = null;
 
 Module.prototype.require = function(id) {
@@ -29,10 +56,18 @@ Module.prototype.require = function(id) {
 		// Build patches once from the real electron module
 		if (!PatchedBrowserWindow) {
 			console.log('[Frame Fix] Intercepting electron module');
+
+			if (result.app && typeof result.app.setDesktopName === 'function') {
+				result.app.setDesktopName('figma-desktop');
+				console.log('[Frame Fix] Set desktop name to figma-desktop');
+			}
+
 			const OriginalBrowserWindow = result.BrowserWindow;
 			const OriginalWebContentsView = result.WebContentsView;
 			const OriginalBrowserView = result.BrowserView;
 			const OriginalMenu = result.Menu;
+			const OriginalTray = result.Tray;
+			const appIconPath = resolveAppIconPath();
 
 			PatchedBrowserWindow = class BrowserWindowWithFrame extends OriginalBrowserWindow {
 				constructor(options) {
@@ -48,6 +83,10 @@ Module.prototype.require = function(id) {
 
 					if (process.platform === 'linux') {
 						options = options || {};
+						// Set window icon for X11 _NET_WM_ICON and GTK window icon
+						if (!options.icon && appIconPath && !isTrayWindow) {
+							options.icon = appIconPath;
+						}
 						const originalFrame = options.frame;
 						// Force native frame
 						options.frame = true;
@@ -63,6 +102,11 @@ Module.prototype.require = function(id) {
 					if (process.platform === 'linux') {
 						if (!isTrayWindow) {
 							applyWindowsUserAgent(this.webContents);
+							if (appIconPath) {
+								try {
+									this.setIcon(appIconPath);
+								} catch (_) {}
+							}
 						}
 
 						// Hide menu bar after window creation
@@ -236,6 +280,116 @@ Module.prototype.require = function(id) {
 				}
 			};
 
+			// Intercept Tray to support dark mode icons on Linux
+			if (OriginalTray) {
+				const activeTrays = new Set();
+
+				const shouldUseDarkTrayIcon = () => {
+					const env = (process.env.FIGMA_TRAY_THEME || '').toLowerCase().trim();
+					if (env === 'dark') return true;
+					if (env === 'light') return false;
+					try {
+						return !!(result.nativeTheme && result.nativeTheme.shouldUseDarkColors);
+					} catch (_e) {
+						return false;
+					}
+				};
+
+				const resolveTrayIcon = (iconPath) => {
+					if (typeof iconPath !== 'string') return iconPath;
+
+					const wantDark = shouldUseDarkTrayIcon();
+					let candidate = iconPath;
+					if (wantDark) {
+						if (candidate.includes('iconWithIndicatorLight')) {
+							candidate = candidate.replace('iconWithIndicatorLight', 'iconWithIndicatorDark');
+						} else if (candidate.includes('iconLight')) {
+							candidate = candidate.replace('iconLight', 'iconDark');
+						}
+					} else {
+						if (candidate.includes('iconWithIndicatorDark')) {
+							candidate = candidate.replace('iconWithIndicatorDark', 'iconWithIndicatorLight');
+						} else if (candidate.includes('iconDark')) {
+							candidate = candidate.replace('iconDark', 'iconLight');
+						}
+					}
+
+					if (candidate !== iconPath) {
+						try {
+							if (fs.existsSync(candidate)) return candidate;
+							if (fs.existsSync(iconPath)) return iconPath;
+						} catch (_e) {
+							return candidate;
+						}
+					}
+					return candidate;
+				};
+
+				PatchedTray = class TrayWithTheme extends OriginalTray {
+					constructor(image, guid) {
+						const rawImage = image;
+						const resolvedImage = process.platform === 'linux' ? resolveTrayIcon(image) : image;
+						super(resolvedImage, guid);
+						this._rawIconPath = rawImage;
+						this._appliedIconPath = resolvedImage;
+						if (process.platform === 'linux') {
+							activeTrays.add(this);
+							console.log(`[Frame Fix] Linux Tray initialized: ${resolvedImage} (darkTheme=${shouldUseDarkTrayIcon()})`);
+						}
+					}
+
+					setImage(image) {
+						this._rawIconPath = image;
+						const resolvedImage = process.platform === 'linux' ? resolveTrayIcon(image) : image;
+						this._appliedIconPath = resolvedImage;
+						return super.setImage(resolvedImage);
+					}
+
+					destroy() {
+						activeTrays.delete(this);
+						return super.destroy();
+					}
+				};
+
+				for (const key of Object.getOwnPropertyNames(OriginalTray)) {
+					if (key !== 'prototype' && key !== 'length' && key !== 'name') {
+						try {
+							const descriptor = Object.getOwnPropertyDescriptor(OriginalTray, key);
+							if (descriptor) {
+								Object.defineProperty(PatchedTray, key, descriptor);
+							}
+						} catch (_e) {
+							// Ignore non-configurable properties
+						}
+					}
+				}
+
+				if (process.platform === 'linux' && result.nativeTheme && typeof result.nativeTheme.on === 'function') {
+					result.nativeTheme.on('updated', () => {
+						const isDark = shouldUseDarkTrayIcon();
+						console.log(`[Frame Fix] nativeTheme updated: shouldUseDarkColors=${result.nativeTheme.shouldUseDarkColors}, trayDark=${isDark}`);
+						for (const tray of activeTrays) {
+							try {
+								if (tray.isDestroyed && tray.isDestroyed()) {
+									activeTrays.delete(tray);
+									continue;
+								}
+								if (tray._rawIconPath) {
+									const targetIcon = resolveTrayIcon(tray._rawIconPath);
+									if (targetIcon !== tray._appliedIconPath) {
+										console.log(`[Frame Fix] Theme changed, switching tray icon to: ${targetIcon}`);
+										tray._appliedIconPath = targetIcon;
+										OriginalTray.prototype.setImage.call(tray, targetIcon);
+									}
+								}
+							} catch (err) {
+								console.error('[Frame Fix] Error updating tray icon on theme change:', err);
+							}
+						}
+					});
+				}
+			}
+
 			console.log('[Frame Fix] Patches built successfully');
 		}
 
@@ -247,6 +401,7 @@ Module.prototype.require = function(id) {
 				if (prop === 'BrowserWindow') return PatchedBrowserWindow;
 				if (prop === 'WebContentsView' && PatchedWebContentsView) return PatchedWebContentsView;
 				if (prop === 'BrowserView' && PatchedBrowserView) return PatchedBrowserView;
+				if (prop === 'Tray') return PatchedTray || target.Tray;
 				if (prop === 'Menu') {
 					// Return a proxy for Menu that intercepts setApplicationMenu
 					const originalMenu = target.Menu;

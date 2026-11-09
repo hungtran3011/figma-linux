@@ -1,0 +1,55 @@
+#!/bin/sh
+# AM / AppMan installation and updater script for Figma Desktop
+set -u
+APP="figma-desktop"
+SITE="hungtran3011/figma-linux"
+
+[ -n "$APP" ] && mkdir -p "/opt/$APP/tmp" "/opt/$APP/icons" && cd "/opt/$APP/tmp" || exit 1
+
+version0=$(cat "/opt/$APP/version" 2>/dev/null || true)
+version=$(curl -Ls "https://api.github.com/repos/$SITE/releases/latest" 2>/dev/null | grep -oP '"tag_name":\s*"\K[^"]+' || true)
+[ -n "$version" ] || { echo "Error: Could not retrieve latest version from GitHub"; exit 1; }
+
+download_url=$(curl -Ls "https://api.github.com/repos/$SITE/releases/latest" 2>/dev/null | grep -oP '"browser_download_url":\s*"\K[^"]+\.AppImage(?=")' | head -n 1 || true)
+[ -n "$download_url" ] || { echo "Error: Could not retrieve download URL from GitHub"; exit 1; }
+
+# Update logic: attempt delta update via appimageupdatetool if installed
+if command -v appimageupdatetool >/dev/null 2>&1 && [ -f "/opt/$APP/$APP" ]; then
+	cd "/opt/$APP" || exit 1
+	if appimageupdatetool -Or ./"$APP"; then
+		chmod a+x ./"$APP"
+		echo "$version" > ./version
+		echo "$APP updated successfully via appimageupdatetool."
+		exit 0
+	fi
+fi
+
+# Full download / install if version differs or binary is missing
+if [ "$version" != "$version0" ] || [ ! -f "/opt/$APP/$APP" ]; then
+	echo "Downloading $APP $version..."
+	wget -q --show-progress "$download_url" -O "/opt/$APP/tmp/$APP" || exit 1
+	cd "/opt/$APP" || exit 1
+	mv --backup=t ./tmp/"$APP" ./"$APP"
+	chmod a+x ./"$APP"
+	echo "$version" > ./version
+	rm -rf ./tmp
+
+	# Extract desktop file and icon for system integration
+	./"$APP" --appimage-extract "*.desktop" >/dev/null 2>&1 || true
+	./"$APP" --appimage-extract "*.png" >/dev/null 2>&1 || true
+	if [ -d squashfs-root ]; then
+		desktop_src=$(find squashfs-root -name "*.desktop" | head -1)
+		icon_src=$(find squashfs-root -name "*.png" | head -1)
+		if [ -n "$desktop_src" ]; then
+			mkdir -p /usr/share/applications 2>/dev/null || true
+			cp "$desktop_src" "/usr/share/applications/$APP.desktop" 2>/dev/null || true
+			sed -i "s|Exec=AppRun|Exec=/opt/$APP/$APP|g" "/usr/share/applications/$APP.desktop" 2>/dev/null || true
+		fi
+		if [ -n "$icon_src" ]; then
+			mkdir -p /usr/share/icons/hicolor/256x256/apps 2>/dev/null || true
+			cp "$icon_src" "/usr/share/icons/hicolor/256x256/apps/$APP.png" 2>/dev/null || true
+		fi
+		rm -rf squashfs-root
+	fi
+	echo "$APP $version installed successfully."
+fi

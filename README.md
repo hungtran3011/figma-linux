@@ -74,6 +74,21 @@ On first launch the AppImage automatically:
 
 After that, Figma appears in your application menu like any other app.
 
+### Updates (GearLever, AM, and CLI)
+
+The AppImage embeds standard update metadata (`gh-releases-zsync`) and distributes companion `.zsync` files on GitHub releases:
+
+- **[GearLever](https://flathub.org/apps/it.mijorus.gearlever)**: Automatically detects update availability from GitHub releases and performs one-click in-place updates.
+- **[AM / AppMan](https://github.com/ivan-hc/AM)**: Supports differential in-place delta updates via `appimageupdatetool -Or` (`am -u figma-desktop`). A recipe template is provided in [`scripts/AM/figma-desktop`](scripts/AM/figma-desktop).
+- **CLI Update Helper**:
+  ```bash
+  # Check if an update is available
+  ./figma-desktop-*.AppImage --check-update
+
+  # Update in-place using appimageupdatetool, AM, or GearLever
+  ./figma-desktop-*.AppImage --update
+  ```
+
 ### Local Fonts
 
 The app includes a built-in font helper, so AppImage, deb, and rpm builds expose installed system/user fonts without a separate `figma-agent-linux` install. On launch, the patched native stub starts a localhost helper compatible with [neetly/figma-agent-linux](https://github.com/neetly/figma-agent-linux) at `127.0.0.1:44950` and serves the same data through Figma's desktop font APIs.
@@ -177,12 +192,12 @@ The launcher handles both X11 and Wayland:
 | Environment           | Behavior                                     |
 | --------------------- | -------------------------------------------- |
 | **X11**               | Works out of the box                         |
-| **Wayland** (default) | Uses XWayland when available for compatibility |
-| **Wayland** (native)  | Opt-in, or automatic when `DISPLAY` is absent |
+| **Wayland** (default) | Uses native Wayland (native gestures: pinch-to-zoom & pan) |
+| **XWayland** (fallback)| Opt-in via `FIGMA_USE_X11=1`                 |
 
 ```bash
-# Force native Wayland mode
-FIGMA_USE_WAYLAND=1 ./figma-desktop-*.AppImage
+# Fall back to XWayland if needed
+FIGMA_USE_X11=1 ./figma-desktop-*.AppImage
 ```
 
 ### Renderer selection
@@ -202,10 +217,9 @@ FIGMA_RENDERER=hardware ./figma-desktop-*.AppImage  # Electron graphics defaults
 
 Software rendering uses the CPU and can be slower on large designs. GLX presence
 does not guarantee a working GPU driver; `FIGMA_RENDERER=software` also provides
-a manual fallback for driver problems. Native Wayland remains opt-in through
-`FIGMA_USE_WAYLAND=1`, and is selected automatically when a Wayland display exists
-without an X11 `DISPLAY`. `FIGMA_USE_X11=1` explicitly prefers XWayland when both
-backends are available.
+a manual fallback for driver problems. Native Wayland is used by default when running
+on a Wayland display. `FIGMA_USE_X11=1` (or `FIGMA_USE_WAYLAND=0`) allows opting
+into XWayland if required.
 
 ## Extra Features
 
@@ -232,6 +246,17 @@ make run-debug
 ```
 
 Setting `FIGMA_DEBUG=1` enables verbose logging to stdout and automatically opens DevTools for the tray notification window (Feed).
+
+### System Tray Theme (Dark / Light Mode)
+
+On Linux, the tray icon automatically detects your system color scheme (`nativeTheme.shouldUseDarkColors`) and switches between the white icon (for dark desktop panels) and black icon (for light panels). It dynamically adapts when your desktop theme changes at runtime.
+
+You can override automatic detection using `FIGMA_TRAY_THEME`:
+
+```bash
+FIGMA_TRAY_THEME=dark ./figma-desktop-*.AppImage   # Force white icon (for dark panels)
+FIGMA_TRAY_THEME=light ./figma-desktop-*.AppImage  # Force black icon (for light panels)
+```
 
 ### Developer Tools Shortcuts
 
@@ -270,7 +295,7 @@ figma-desktop-linux/
 - **Native modules** — redirects `bindings.node` and `desktop_rust.node` imports to `figma-native-stub.js`, including the `bindings_worker.js` utility process used for font enumeration.
 - **Local fonts** — starts a built-in localhost helper at `127.0.0.1:44950` with `/figma/version`, `/figma/font-files`, and `/figma/font-file`, backed by the pure JS scanner in `scripts/font-enum/`.
 - **Linux argument handling** — rewrites `handleCommandLineArgs` so `figma://` URLs and file paths are found even when Electron inserts Linux launcher flags before the app path.
-- **Tray integration** — fixes right-click context menus on Linux, adds the persistent **Allow Duplicate Tabs** toggle, and keeps tray notifications debuggable with `FIGMA_DEBUG=1`.
+- **Tray integration** — fixes right-click context menus on Linux, dynamically adapts tray icon colors to system dark/light mode (with optional `FIGMA_TRAY_THEME=dark|light` override), adds the persistent **Allow Duplicate Tabs** toggle, and keeps tray notifications debuggable with `FIGMA_DEBUG=1`.
 - **Package entrypoint** — updates the packaged `package.json` to load `frame-fix-wrapper.js` before Figma's original entry point.
 
 ## Known Limitations

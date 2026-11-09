@@ -1,4 +1,4 @@
-APPIMAGE := $(wildcard figma-desktop-*.AppImage)
+APPIMAGE := $(firstword $(wildcard figma-desktop-*.AppImage build/figma-desktop-*.AppImage))
 
 .PHONY: build build-deb build-rpm build-appimage run run-debug clean url
 

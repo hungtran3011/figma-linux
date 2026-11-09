@@ -26,6 +26,10 @@ Type=Application
 Categories=Utility;
 DESKTOP
 cp "$script_dir/../assets/figma-icon.svg" "$smoke_dir/Smoke.AppDir/smoke.svg"
-ARCH="$tool_arch" APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool_path" \
-  --runtime-file "$runtime_path" "$smoke_dir/Smoke.AppDir" "$smoke_dir/smoke.AppImage"
+update_info="gh-releases-zsync|hungtran3011|figma-linux|latest|smoke-*${tool_arch}.AppImage.zsync"
+(cd "$smoke_dir" && ARCH="$tool_arch" APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool_path" \
+  -u "$update_info" \
+  --runtime-file "$runtime_path" "$smoke_dir/Smoke.AppDir" "smoke.AppImage")
+test -f "$smoke_dir/smoke.AppImage.zsync"
+strings "$smoke_dir/smoke.AppImage" | grep -F "$update_info" >/dev/null
 APPIMAGE_EXTRACT_AND_RUN=1 "$smoke_dir/smoke.AppImage" | grep -Fx 'AppImage runtime smoke passed'

@@ -15,6 +15,27 @@ echo "App Staging Directory: $app_staging_dir"
 echo "Package Name: $package_name"
 
 component_id='io.github.nickvdp.figma-desktop-linux'
+
+# Determine update information for GearLever, AM, and AppImageUpdate
+update_repo="${FIGMA_UPDATE_REPO:-}"
+if [[ -z $update_repo && -n ${GITHUB_REPOSITORY:-} ]]; then
+	update_repo="$GITHUB_REPOSITORY"
+fi
+if [[ -z $update_repo ]]; then
+	git_remote=$(git config --get remote.origin.url 2>/dev/null || true)
+	if [[ $git_remote =~ github\.com[:/]([^/]+)/([^/.]+?)(\.git)?$ ]]; then
+		update_repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+	fi
+fi
+[[ -z $update_repo ]] && update_repo='hungtran3011/figma-linux'
+
+update_info=''
+if [[ ${FIGMA_NO_UPDATE_INFO:-0} != '1' ]]; then
+	update_info="${FIGMA_UPDATE_INFO:-gh-releases-zsync|${update_repo%/*}|${update_repo#*/}|latest|${package_name}-*${architecture}.AppImage.zsync}"
+fi
+echo "Update repository: $update_repo"
+echo "Update information: ${update_info:-none}"
+
 # Define AppDir structure path
 appdir_path="$work_dir/${component_id}.AppDir"
 rm -rf "$appdir_path"
@@ -74,18 +95,20 @@ source "$appdir/usr/lib/figma-desktop/launcher-common.sh"
 setup_logging || exit 1
 setup_electron_env
 
-# --- Desktop Integration for figma:// URL scheme ---
-# Register .desktop file so the system knows how to handle figma:// URLs
+# --- Desktop Integration for figma:// URL scheme and Taskbar Icon ---
+# Register .desktop file so the system knows how to handle figma:// URLs and taskbar icons
 integrate_desktop() {
 	local desktop_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 	local icon_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps"
-	local desktop_file="$desktop_dir/figma-desktop-appimage.desktop"
+	local desktop_file="$desktop_dir/figma-desktop.desktop"
+	local legacy_desktop_file="$desktop_dir/figma-desktop-appimage.desktop"
 	local needs_update=false
 
 	mkdir -p "$desktop_dir" "$icon_dir" 2>/dev/null
 
 	# Copy icon if available
 	local icon_src="$appdir/io.github.nickvdp.figma-desktop-linux.png"
+	[[ ! -f $icon_src && -f "$appdir/figma-desktop.png" ]] && icon_src="$appdir/figma-desktop.png"
 	local icon_dest="$icon_dir/figma-desktop.png"
 	if [[ -f $icon_src ]]; then
 		if [[ ! -f $icon_dest ]] || ! cmp -s "$icon_src" "$icon_dest"; then
@@ -109,8 +132,15 @@ Terminal=false
 Categories=Graphics;
 Comment=Figma Desktop for Linux (AppImage)
 MimeType=x-scheme-handler/figma;
-StartupWMClass=Figma
+StartupWMClass=figma-desktop
+X-AppImage-Version=${app_version}
+X-AppImage-Name=Figma Desktop
 DESKTOP
+		if [[ -n $update_info ]]; then
+			echo "X-AppImage-Update-Information=${update_info}" >> "$desktop_file"
+		fi
+		# Ensure backward compatibility symlink exists
+		ln -sf "$desktop_file" "$legacy_desktop_file" 2>/dev/null || true
 		needs_update=true
 		log_message "Desktop file created/updated: $desktop_file"
 	fi
@@ -118,10 +148,64 @@ DESKTOP
 	# Update MIME database if changed
 	if [[ $needs_update == true ]]; then
 		update-desktop-database "$desktop_dir" 2>/dev/null || true
-		xdg-mime default figma-desktop-appimage.desktop x-scheme-handler/figma 2>/dev/null || true
+		xdg-mime default figma-desktop.desktop x-scheme-handler/figma 2>/dev/null || true
 		log_message 'Desktop integration updated (figma:// URL scheme registered)'
 	fi
 }
+
+# Read version and update information from bundled desktop file
+app_version=$(grep -m1 '^X-AppImage-Version=' "$appdir"/*.desktop 2>/dev/null | cut -d= -f2-)
+update_info=$(grep -m1 '^X-AppImage-Update-Information=' "$appdir"/*.desktop 2>/dev/null | cut -d= -f2-)
+
+# Handle update helper CLI options (--update, --check-update)
+case "${1:-}" in
+	--check-update|--check-updates)
+		echo "Checking for updates for Figma Desktop (${app_version:-unknown})..."
+		if command -v appimageupdatetool >/dev/null 2>&1; then
+			appimageupdatetool --check-for-update "$appimage_path"
+			exit $?
+		fi
+		if [[ -n $update_info && $update_info =~ gh-releases-zsync\|([^|]+)\|([^|]+)\| ]]; then
+			owner="${BASH_REMATCH[1]}"
+			repo="${BASH_REMATCH[2]}"
+			latest_tag=$(curl -sL --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${owner}/${repo}/releases/latest" 2>/dev/null | grep -oP '"tag_name":\s*"\K[^"]+' || true)
+			if [[ -n $latest_tag ]]; then
+				echo "Installed: ${app_version:-unknown}"
+				echo "Latest:    ${latest_tag}"
+				clean_latest="${latest_tag#v}"
+				clean_current="${app_version#v}"
+				if [[ -n $clean_latest && -n $clean_current && "$clean_latest" != "$clean_current" ]]; then
+					echo "Update available: $latest_tag"
+					exit 1
+				else
+					echo "Figma Desktop is up to date."
+					exit 0
+				fi
+			fi
+		fi
+		echo "Unable to check for updates (appimageupdatetool missing and GitHub API unreachable)." >&2
+		exit 2
+		;;
+	--update)
+		echo "Updating Figma Desktop (${app_version:-unknown})..."
+		if command -v appimageupdatetool >/dev/null 2>&1; then
+			appimageupdatetool -Or "$appimage_path"
+			exit $?
+		elif command -v am >/dev/null 2>&1; then
+			am -u figma-desktop 2>/dev/null || am -u figma
+			exit $?
+		elif command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -q 'it.mijorus.gearlever'; then
+			flatpak run it.mijorus.gearlever --update "$appimage_path"
+			exit $?
+		else
+			echo "To update via zsync differential download, install appimageupdatetool, am, or GearLever." >&2
+			if [[ -n $update_info && $update_info =~ gh-releases-zsync\|([^|]+)\|([^|]+)\| ]]; then
+				echo "Latest release download: https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/releases/latest" >&2
+			fi
+			exit 1
+		fi
+		;;
+esac
 
 # Run desktop integration (non-blocking, errors are non-fatal)
 integrate_desktop 2>/dev/null || true
@@ -176,12 +260,17 @@ Terminal=false
 Categories=Graphics;
 Comment=Figma Desktop for Linux
 MimeType=x-scheme-handler/figma;
-StartupWMClass=Figma
+StartupWMClass=figma-desktop
 X-AppImage-Version=$version
 X-AppImage-Name=Figma Desktop
 EOF
+if [[ -n $update_info ]]; then
+	echo "X-AppImage-Update-Information=$update_info" >> "$appdir_path/$component_id.desktop"
+fi
 mkdir -p "$appdir_path/usr/share/applications" || exit 1
 cp "$appdir_path/$component_id.desktop" "$appdir_path/usr/share/applications/" || exit 1
+ln -sf "$component_id.desktop" "$appdir_path/usr/share/applications/figma-desktop.desktop" || true
+ln -sf "$component_id.desktop" "$appdir_path/figma-desktop.desktop" || true
 echo 'Desktop entry created'
 
 # --- Copy Icons ---
@@ -195,7 +284,9 @@ fi
 
 if [[ -f $icon_source_path ]]; then
 	cp "$icon_source_path" "$appdir_path/usr/share/icons/hicolor/256x256/apps/${component_id}.png" || exit 1
+	cp "$icon_source_path" "$appdir_path/usr/share/icons/hicolor/256x256/apps/figma-desktop.png" || exit 1
 	cp "$icon_source_path" "$appdir_path/${component_id}.png" || exit 1
+	cp "$icon_source_path" "$appdir_path/figma-desktop.png" || exit 1
 	cp "$icon_source_path" "$appdir_path/${component_id}" || exit 1
 	cp "$icon_source_path" "$appdir_path/.DirIcon" || exit 1
 	echo 'Icon copied to standard locations'
@@ -262,9 +353,16 @@ output_path="$work_dir/$output_filename"
 export ARCH="$tool_arch"
 echo "Using ARCH=$ARCH"
 
-echo 'Building AppImage without update information'
-if ! APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool_path" \
-	--runtime-file "$runtime_path" "$appdir_path" "$output_path"; then
+appimagetool_opts=("--runtime-file" "$runtime_path")
+if [[ -n $update_info ]]; then
+	echo "Building AppImage with update information: $update_info"
+	appimagetool_opts+=("-u" "$update_info")
+else
+	echo 'Building AppImage without update information'
+fi
+
+if ! (cd "$work_dir" && APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool_path" \
+	"${appimagetool_opts[@]}" "$appdir_path" "$output_filename"); then
 	echo "Failed to build AppImage using $appimagetool_path" >&2
 	exit 1
 fi

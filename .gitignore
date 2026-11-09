@@ -13,6 +13,7 @@ rpmbuild/
 
 # Generated packages
 *.AppImage
+*.zsync
 *.deb
 *.rpm
 
