@@ -11,9 +11,19 @@ class MockTray extends EventEmitter {
     this.image = image;
     this.guid = guid;
     this.destroyed = false;
+    this.contextMenu = null;
+    this.poppedUpMenu = null;
+    this.poppedUpPosition = null;
   }
   setImage(image) {
     this.image = image;
+  }
+  setContextMenu(menu) {
+    this.contextMenu = menu;
+  }
+  popUpContextMenu(menu, position) {
+    this.poppedUpMenu = menu;
+    this.poppedUpPosition = position;
   }
   destroy() {
     this.destroyed = true;
@@ -145,4 +155,36 @@ test('Tray icon dynamically updates on nativeTheme updated event', () => {
   mockNativeTheme.emit('updated');
   // Since destroyed, should remain what it was before destruction
   assert.equal(tray.destroyed, true);
+});
+
+test('popUpContextMenu sets contextMenu on Linux and delegates to super', () => {
+  const tray = new electron.Tray('/assets/tray/iconLight.png');
+  const dummyMenu = { items: [{ label: 'Quit' }] };
+  tray.popUpContextMenu(dummyMenu, { x: 50, y: 100 });
+
+  assert.equal(tray.contextMenu, dummyMenu);
+  assert.equal(tray.poppedUpMenu, dummyMenu);
+  assert.deepEqual(tray.poppedUpPosition, { x: 50, y: 100 });
+  tray.destroy();
+});
+
+test('tray context menu regex matches both legacy and modern Figma tray patterns', () => {
+  const pattern = /this\.electronTray\.setToolTip\((\w+)\.name\),(this\.electronTray\.on\(("|\')right-click\3,\(\)=>\{[^{}]*?\.popUpContextMenu\((\w+)\(\)\)\}\))/;
+
+  const modernCode = 'this.electronTray.setToolTip(N.name),this.electronTray.on("right-click",()=>{this.electronTray?.popUpContextMenu(Qet())})';
+  const legacyCode = 'this.electronTray.setToolTip(ne.name),this.electronTray.on(\'right-click\',()=>{var r;(r=this.electronTray)==null||r.popUpContextMenu(qSt())})';
+
+  const mModern = modernCode.match(pattern);
+  assert.ok(mModern);
+  assert.equal(mModern[1], 'N');
+  assert.equal(mModern[4], 'Qet');
+  const modernReplaced = 'this.electronTray.setToolTip(' + mModern[1] + '.name),this.electronTray.setContextMenu(' + mModern[4] + '()),' + mModern[2];
+  assert.equal(modernReplaced, 'this.electronTray.setToolTip(N.name),this.electronTray.setContextMenu(Qet()),this.electronTray.on("right-click",()=>{this.electronTray?.popUpContextMenu(Qet())})');
+
+  const mLegacy = legacyCode.match(pattern);
+  assert.ok(mLegacy);
+  assert.equal(mLegacy[1], 'ne');
+  assert.equal(mLegacy[4], 'qSt');
+  const legacyReplaced = 'this.electronTray.setToolTip(' + mLegacy[1] + '.name),this.electronTray.setContextMenu(' + mLegacy[4] + '()),' + mLegacy[2];
+  assert.equal(legacyReplaced, 'this.electronTray.setToolTip(ne.name),this.electronTray.setContextMenu(qSt()),this.electronTray.on(\'right-click\',()=>{var r;(r=this.electronTray)==null||r.popUpContextMenu(qSt())})');
 });

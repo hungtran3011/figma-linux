@@ -1092,19 +1092,24 @@ if (m) {
 const fs = require('fs');
 let code = fs.readFileSync('$main_js', 'utf8');
 
-// Regex matches tray init regardless of minified variable names:
-//   this.electronTray.setToolTip(MOD.name),this.electronTray.on(\"right-click\",()=>{var V;(V=this.electronTray)==null||V.popUpContextMenu(MENUFN())})
-const pattern = /this\.electronTray\.setToolTip\((\w+)\.name\),this\.electronTray\.on\(\"right-click\",\(\)=>\{var (\w+);\(\2=this\.electronTray\)==null\|\|\2\.popUpContextMenu\((\w+)\(\)\)\}\)/;
-const m = code.match(pattern);
-if (m) {
-  const [fullMatch, modName, varName, menuFn] = m;
-  const replacement = 'this.electronTray.setToolTip(' + modName + '.name),this.electronTray.setContextMenu(' + menuFn + '()),this.electronTray.on(\"right-click\",()=>{var ' + varName + ';(' + varName + '=this.electronTray)==null||' + varName + '.popUpContextMenu(' + menuFn + '())})';
-  code = code.replace(fullMatch, replacement);
-  fs.writeFileSync('$main_js', code);
-  console.log('Tray context menu patched: added setContextMenu() for Linux (regex match)');
+if (code.includes('this.electronTray.setContextMenu(')) {
+  console.log('Tray context menu patch already applied - skipping');
 } else {
-  console.error('Warning: Tray context menu pattern not found - Figma may have updated');
-  console.error('Right-click on tray icon may not show context menu on Linux');
+  // Regex matches tray init across Figma versions (with transpiled null checks or optional chaining):
+  //   Old: this.electronTray.setToolTip(MOD.name),this.electronTray.on(\"right-click\",()=>{var V;(V=this.electronTray)==null||V.popUpContextMenu(MENUFN())})
+  //   New: this.electronTray.setToolTip(MOD.name),this.electronTray.on(\"right-click\",()=>{this.electronTray?.popUpContextMenu(MENUFN())})
+  const pattern = /this\.electronTray\.setToolTip\((\w+)\.name\),(this\.electronTray\.on\((\"|')right-click\3,\(\)=>\{[^{}]*?\.popUpContextMenu\((\w+)\(\)\)\}\))/;
+  const m = code.match(pattern);
+  if (m) {
+    const [fullMatch, modName, rightClickHandler, , menuFn] = m;
+    const replacement = 'this.electronTray.setToolTip(' + modName + '.name),this.electronTray.setContextMenu(' + menuFn + '()),' + rightClickHandler;
+    code = code.replace(fullMatch, replacement);
+    fs.writeFileSync('$main_js', code);
+    console.log('Tray context menu patched: added setContextMenu() for Linux (regex match)');
+  } else {
+    console.error('Warning: Tray context menu pattern not found - Figma may have updated');
+    console.error('Right-click on tray icon may not show context menu on Linux');
+  }
 }
 "
 	fi

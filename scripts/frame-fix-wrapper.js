@@ -345,6 +345,20 @@ Module.prototype.require = function(id) {
 						return super.setImage(resolvedImage);
 					}
 
+					popUpContextMenu(menu, position) {
+						if (process.platform === 'linux' && menu && typeof this.setContextMenu === 'function') {
+							try {
+								this.setContextMenu(menu);
+								console.log('[Frame Fix] Tray context menu applied via popUpContextMenu');
+							} catch (err) {
+								console.error('[Frame Fix] Error setting context menu from popUpContextMenu:', err);
+							}
+						}
+						if (typeof super.popUpContextMenu === 'function') {
+							return super.popUpContextMenu(menu, position);
+						}
+					}
+
 					destroy() {
 						activeTrays.delete(this);
 						return super.destroy();
