@@ -124,8 +124,21 @@ setup_electron_env() {
 # Idempotent (safe to call on every launch); non-fatal on failure.
 # update-desktop-database alone is enough on some distros (Fedora), but
 # Ubuntu/snap-sandboxed browsers need an explicit xdg-mime default.
+#
+# Inside distrobox the exported desktop file is renamed to
+# <container>-<name>.desktop, so the un-prefixed id only exists inside the
+# container. The OS handler lookup happens outside (in the browser's
+# environment, against the shared ~/.local/share/applications) and finds
+# nothing there, so the "Open in Figma Desktop" button on the login page
+# silently does nothing. Register the exported name when there is one.
 register_url_scheme() {
 	local desktop_id="${1:-figma-desktop.desktop}"
 	command -v xdg-mime > /dev/null 2>&1 || return 0
+	if [ -z "${1:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
+		local exported_id="${CONTAINER_ID}-${desktop_id}"
+		if [ -f "${XDG_DATA_HOME:-${HOME}/.local/share}/applications/${exported_id}" ]; then
+			desktop_id="$exported_id"
+		fi
+	fi
 	xdg-mime default "$desktop_id" x-scheme-handler/figma > /dev/null 2>&1 || true
 }
