@@ -154,8 +154,8 @@ DESKTOP
 }
 
 # Read version and update information from bundled desktop file
-app_version=$(grep -m1 '^X-AppImage-Version=' "$appdir"/*.desktop 2>/dev/null | cut -d= -f2-)
-update_info=$(grep -m1 '^X-AppImage-Update-Information=' "$appdir"/*.desktop 2>/dev/null | cut -d= -f2-)
+app_version=$(grep -h -m1 '^X-AppImage-Version=' "$appdir"/*.desktop 2>/dev/null | head -n 1 | cut -d= -f2-)
+update_info=$(grep -h -m1 '^X-AppImage-Update-Information=' "$appdir"/*.desktop 2>/dev/null | head -n 1 | cut -d= -f2-)
 
 # Handle update helper CLI options (--update, --check-update)
 case "${1:-}" in

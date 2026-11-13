@@ -76,22 +76,22 @@ jobs:
           if [ -n "$EXISTING_ISSUE" ]; then
             echo "Issue #$EXISTING_ISSUE already open for $UPSTREAM_VER. Skipping creation."
           else
-            cat <<-EOF > issue_body.md
-            ### Upstream Update Detected
+            cat <<EOF > issue_body.md
+          ### Upstream Update Detected
 
-            An official Figma Desktop release **$UPSTREAM_VER** is available on \`desktop.figma.com\`.
+          An official Figma Desktop release **$UPSTREAM_VER** is available on \`desktop.figma.com\`.
 
-            - **Detected Upstream Version**: \`$UPSTREAM_VER\`
-            - **Latest Packaged Release**: \`${LATEST_RELEASE:-None}\`
+          - **Detected Upstream Version**: \`$UPSTREAM_VER\`
+          - **Latest Packaged Release**: \`${LATEST_RELEASE:-None}\`
 
-            #### How to Build & Release:
-            1. **GitHub Actions**: Run the [Build and Release Workflow](https://github.com/${{ github.repository }}/actions/workflows/release.yml) with \`version=$UPSTREAM_VER\`.
-            2. **Git Tag**:
-            \`\`\`bash
-            git tag $UPSTREAM_VER
-            git push origin $UPSTREAM_VER
-            \`\`\`
-            EOF
+          #### How to Build & Release:
+          1. **GitHub Actions**: Run the [Build and Release Workflow](https://github.com/${{ github.repository }}/actions/workflows/release.yml) with \`version=$UPSTREAM_VER\`.
+          2. **Git Tag**:
+          \`\`\`bash
+          git tag $UPSTREAM_VER
+          git push origin $UPSTREAM_VER
+          \`\`\`
+          EOF
             gh issue create \
               --title "New Figma Desktop version: $UPSTREAM_VER" \
               --body-file issue_body.md
