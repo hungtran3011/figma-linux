@@ -30,15 +30,24 @@ jobs:
       - name: Check upstream Figma version
         id: check
         run: |
-          source scripts/figma-version-common.sh
-          UPSTREAM_VER=$(figma_fetch_manifest_version "https://desktop.figma.com/win/RELEASES" || echo "")
+          if ! command -v 7z >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y p7zip-full
+          fi
 
-          if [ -z "$UPSTREAM_VER" ]; then
-            echo "::error::Could not determine upstream Figma version from RELEASES manifest."
+          if ! VERSION_JSON=$(./figma-version-tool.sh --json); then
+            echo "::error::Could not determine upstream Figma version from FigmaSetup.exe."
             exit 1
           fi
 
-          echo "Detected upstream version: $UPSTREAM_VER"
+          UPSTREAM_VER=$(jq -r '.selected_version // empty' <<< "$VERSION_JSON")
+          MANIFEST_VER=$(jq -r '.manifest_version // empty' <<< "$VERSION_JSON")
+
+          if [ -z "$UPSTREAM_VER" ]; then
+            echo "::error::Could not parse upstream Figma version from figma-version-tool.sh output: $VERSION_JSON"
+            exit 1
+          fi
+
+          echo "Detected upstream package version: $UPSTREAM_VER (RELEASES manifest: ${MANIFEST_VER:-unavailable})"
           echo "upstream_version=$UPSTREAM_VER" >> "$GITHUB_OUTPUT"
 
           # Get latest release from this repository (stripping any leading 'v')
