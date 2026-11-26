@@ -957,16 +957,31 @@ if (code.includes(oldPattern)) {
 	fi
 
 	# Inject CSS to hide Windows caption buttons (minimize/maximize/close)
-	# but keep the app menu dropdown button visible on Linux
+	# and fix transparent tab bar ghosting/glitches on Linux
 	local shell_html='app.asar.contents/shell.html'
 	if [[ -f $shell_html ]]; then
 		sed -i 's|</head>|<style>\
 #__MINIMIZE_CAPTION_BUTTON__,\
 #__MAXIMIZE_CAPTION_BUTTON__,\
 #__CLOSE_CAPTION_BUTTON__ { display: none !important; }\
+.tab_bar--container--X8RkX {\
+  background-color: var(--color-bg-disabled, #e9e9e9) !important;\
+}\
+.shell--foreground .tab_bar--container--X8RkX {\
+  background-color: var(--color-bg-tertiary, #e9e9e9) !important;\
+}\
+[data-preferred-theme=dark] .tab_bar--container--X8RkX {\
+  background-color: var(--color-bg-disabled, #2c2c2c) !important;\
+}\
+[data-preferred-theme=dark] .shell--foreground .tab_bar--container--X8RkX {\
+  background-color: var(--color-bg-tertiary, #383838) !important;\
+}\
+.tab_bar--draggableTopRegionElement--Xflg6 {\
+  -webkit-app-region: no-drag !important;\
+}\
 </style>\
 </head>|' "$shell_html"
-		echo "Patched $shell_html: hidden Windows caption buttons via CSS"
+		echo "Patched $shell_html: hidden Windows caption buttons and fixed tab bar transparency via CSS"
 	fi
 
 	# ---- Update package.json ----
@@ -1415,10 +1430,11 @@ run_packaging() {
 			exit 1
 		fi
 
-		pkg_file=$(find "$work_dir" -maxdepth 1 -name "$file_pattern" | head -n 1)
+		pkg_file=$(find "$work_dir" -maxdepth 1 -type f -name "$file_pattern" | head -n 1)
 		echo "${build_format^^} Build complete!"
 		if [[ -n $pkg_file && -f $pkg_file ]]; then
 			output_path="./$(basename "$pkg_file")"
+			rm -f "$output_path"
 			mv "$pkg_file" "$output_path" || exit 1
 			echo "Package created at: $output_path"
 		else
@@ -1436,14 +1452,16 @@ run_packaging() {
 		fi
 
 		local appimage_file
-		appimage_file=$(find "$work_dir" -maxdepth 1 -name "${PACKAGE_NAME}-${version}-${architecture}.AppImage" | head -n 1)
+		appimage_file=$(find "$work_dir" -maxdepth 1 -type f -name "${PACKAGE_NAME}-${version}-${architecture}.AppImage" | head -n 1)
 		echo 'AppImage Build complete!'
 		if [[ -n $appimage_file && -f $appimage_file ]]; then
 			output_path="./$(basename "$appimage_file")"
+			rm -f "$output_path"
 			mv "$appimage_file" "$output_path" || exit 1
 			echo "Package created at: $output_path"
 			if [[ -f "${appimage_file}.zsync" ]]; then
 				local zsync_output="./$(basename "${appimage_file}.zsync")"
+				rm -f "$zsync_output"
 				mv "${appimage_file}.zsync" "$zsync_output" || exit 1
 				echo "Zsync file created at: $zsync_output"
 			fi

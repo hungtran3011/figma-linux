@@ -274,6 +274,7 @@ Module.prototype.require = function(id) {
 				if (process.platform === 'linux') {
 					for (const win of PatchedBrowserWindow.getAllWindows()) {
 						if (win.isDestroyed()) continue;
+						if (typeof win.isMenuBarVisible === 'function' && !win.isMenuBarVisible()) continue;
 						win.setMenuBarVisibility(false);
 					}
 					console.log('[Frame Fix] Menu bar hidden on all windows');

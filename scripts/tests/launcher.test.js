@@ -72,12 +72,23 @@ test('failed, malformed, or unavailable X11 probe preserves graphics defaults', 
 test('hardware override bypasses automatic software selection', () => {
   const args = launchArgs({ probe: 'echo "unexpected probe" >&2; exit 99', env: { FIGMA_RENDERER: 'hardware' } });
   assert.ok(!args.includes('--use-angle=swiftshader'));
+  assert.ok(args.includes('--enable-gpu-rasterization'));
+  assert.ok(args.includes('--enable-zero-copy'));
+  assert.ok(args.includes('--ignore-gpu-blocklist'));
 });
 
 test('software override works without probe tools, including native Wayland', () => {
   const args = launchArgs({ missingTools: true, env: { FIGMA_RENDERER: 'software', WAYLAND_DISPLAY: 'wayland-0', FIGMA_USE_WAYLAND: '1' } });
   assert.ok(args.includes('--ozone-platform=wayland'));
   assert.ok(args.includes('--use-angle=swiftshader'));
+  assert.ok(!args.includes('--enable-gpu-rasterization'));
+  assert.ok(!args.includes('--enable-zero-copy'));
+});
+
+test('Wayland session enables WaylandWindowDecorations without deprecated UseOzonePlatform', () => {
+  const args = launchArgs({ env: { WAYLAND_DISPLAY: 'wayland-0' } });
+  assert.ok(args.includes('--enable-features=WaylandWindowDecorations'));
+  assert.ok(!args.some(arg => arg.includes('UseOzonePlatform')));
 });
 
 test('invalid renderer is rejected instead of silently changing rendering', () => {
