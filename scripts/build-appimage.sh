@@ -361,6 +361,8 @@ else
 	echo 'Building AppImage without update information'
 fi
 
+rm -f "$output_path" "${output_path}.zsync"
+
 if ! (cd "$work_dir" && APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool_path" \
 	"${appimagetool_opts[@]}" "$appdir_path" "$output_filename"); then
 	echo "Failed to build AppImage using $appimagetool_path" >&2

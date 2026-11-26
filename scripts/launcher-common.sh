@@ -69,6 +69,10 @@ select_renderer() {
 	if [[ $selected_renderer == 'software' ]]; then
 		# SwiftShader as an OpenGL ES driver; keep WebGL enabled.
 		electron_args+=('--use-gl=angle' '--use-angle=swiftshader')
+	else
+		# Hardware acceleration: force GPU rasterization and zero-copy to prevent
+		# Chromium on Linux from falling back to CPU software rasterization on Wayland/X11
+		electron_args+=('--enable-gpu-rasterization' '--enable-zero-copy' '--ignore-gpu-blocklist')
 	fi
 }
 
@@ -107,7 +111,7 @@ build_electron_args() {
 	else
 		# Native Wayland mode (default on Wayland)
 		log_message 'Using native Wayland backend'
-		electron_args+=('--enable-features=UseOzonePlatform,WaylandWindowDecorations')
+		electron_args+=('--enable-features=WaylandWindowDecorations')
 		electron_args+=('--ozone-platform=wayland')
 		electron_args+=('--enable-wayland-ime')
 		electron_args+=('--wayland-text-input-version=3')
